@@ -2,7 +2,18 @@
 
 Embed a **live Chromium browser** (via the [Chromium Embedded Framework](https://bitbucket.org/chromiumembedded/cef/)) as a Flutter widget — rendered into a `Texture`, so it composites, transforms, clips, and zooms like any other widget, and **keeps rendering even when off-screen / not focused**. Pointer, scroll, and trackpad two-finger pans are forwarded by coordinate (pans are caught even when an ancestor opts into Flutter's trackpad gesture API, as canvas hosts do), and keyboard input reaches the page as real `keydown → keypress → keyup` events (Enter activates a focused button / submits a form, Space toggles a checkbox) — including platform IME composition for CJK / emoji and the ⌃⌘Space emoji picker. Text input is bound to the hosting `FlutterView` (as `EditableText` does), so it **works in multi-view / multi-window apps**; the page cursor drives a `MouseRegion`.
 
-> Status: **experimental, macOS 12+ only** (CEF 144 runtime floor). Real Chromium (any site — JS/CSS/WebGL/video). **Multi-process by default** (GPU-accelerated OSR — `OnAcceleratedPaint` GPU compositing into a shared IOSurface, Retina-crisp; renderer/utility crashes isolated, so heavy SPAs like Google sign-in render and survive); `CEF_MULTI_PROCESS=OFF packages/flutter_cef_macos/native/build_cef_host.sh` for the simpler single-process build. No mobile (iOS bans third-party engines); desktop by nature.
+> Status: **experimental — macOS 12+ and Windows 10+** (CEF 144 runtime floor).
+> Real Chromium (any site — JS/CSS/WebGL/video). **Multi-process by default**
+> (GPU-accelerated OSR — `OnAcceleratedPaint` GPU compositing into a shared
+> surface, HiDPI-crisp; renderer/utility crashes isolated, so heavy SPAs like
+> Google sign-in render and survive). macOS composites into an `IOSurface`;
+> Windows copies the shared D3D11 texture into a DXGI-shared bridge that Flutter's
+> ANGLE compositor samples. **macOS is the reference platform**; the Windows port
+> reaches feature parity for browsing, input/IME, persistent+shared profiles,
+> cookies, the JS bridge, dialogs/find/zoom/downloads, and single-tile
+> agent-control — with per-tile CDP isolation, the Chromium sandbox, and
+> code-signing still pending (see [Roadmap](#roadmap)). No mobile (iOS bans
+> third-party engines); desktop by nature.
 
 ```dart
 import 'package:flutter_cef/flutter_cef.dart';
@@ -79,22 +90,34 @@ bar, live title).
 
 ```
 Dart  CefWebView + CefWebController   (MethodChannel "flutter_cef")
-  → macOS plugin (FlutterCefPlugin / CefWebSession):
-      allocates a global IOSurface + CVPixelBuffer, registers a FlutterTexture,
-      spawns one cef_host.app per view, relays input + cursor over a Unix socket
-  → cef_host.app: CEF windowless (OSR), multi-process — the GPU/Viz process
-      composites the page and hands OnAcceleratedPaint a shared-texture
-      IOSurface, which cef_host copies into the host-shared IOSurface →
-      "present" → the texture re-samples. (OnPaint software blit is the
-      single-process fallback.)
+  → host plugin (per OS):
+      macOS   (FlutterCefPlugin / CefWebSession): allocates a global IOSurface +
+              CVPixelBuffer, registers a FlutterTexture, spawns one cef_host.app
+              per profile, relays input + cursor over a Unix socket
+      Windows (FlutterCefPlugin, C++): registers a GpuSurfaceTexture (DXGI shared
+              handle), spawns one cef_host.exe per profile, relays over a named
+              pipe (overlapped I/O)
+  → cef_host: CEF windowless (OSR), multi-process — the GPU/Viz process
+      composites the page and hands OnAcceleratedPaint a shared-texture handle:
+      macOS   copies it into the host-shared IOSurface;
+      Windows opens the shared D3D11 texture and CopyResources it into a
+              DXGI-shared "bridge" texture (NT→legacy handle) that ANGLE samples.
+      → "present" → the texture re-samples. (OnPaint software blit is the fallback.)
 ```
 
-Same pattern JCEF (JetBrains) and CefSharp use to render Chromium into a non-native toolkit — adapted to Flutter's `Texture` + `IOSurface`.
+Same pattern JCEF (JetBrains) and CefSharp use to render Chromium into a
+non-native toolkit — adapted to Flutter's `Texture` (IOSurface on macOS, a
+DXGI-shared D3D11 texture on Windows). One IPC opcode protocol
+([`PROTOCOL.md`](packages/flutter_cef_windows/native/cef_host/PROTOCOL.md))
+drives both; only the surface, transport, app-loop, sandbox, and framework-path
+seams differ per OS (see [`PORTING.md`](PORTING.md)).
 
 ## Building
 
-CEF (~200 MB) is **fetched**, not vendored. Build the renderer once (needs
-`cmake` + `ninja` — `brew install cmake ninja`):
+CEF (~200 MB) is **fetched**, not vendored, on both platforms.
+
+**macOS** — build the renderer once (needs `cmake` + `ninja` —
+`brew install cmake ninja`):
 
 ```sh
 # The macOS implementation lives in packages/flutter_cef_macos.
@@ -103,6 +126,23 @@ native/build_cef_host.sh            # fetches CEF + builds cef_host.app
 export FLUTTER_CEF_HOST="$PWD/native/cef_host/build/cef_host.app/Contents/MacOS/cef_host"
 cd ../../example && flutter run -d macos
 ```
+
+**Windows** — nothing to run by hand: `flutter build windows` (or
+`flutter run -d windows`) drives everything from the plugin's CMake. On the
+first build it fetches the pinned CEF distribution
+(`native/cef_host/fetch_cef.ps1`, SHA-verified, cached under `%LOCALAPPDATA%`)
+and compiles `cef_host.exe`/`.dll` (`build_cef_host.bat` → the VS2022 toolchain,
+located via `vswhere`; `cmake` + `ninja` ship with VS). Needs Windows 10+ with
+Developer Mode on (Flutter uses symlinks for plugins).
+
+```sh
+cd example && flutter run -d windows
+```
+
+> A prebuilt, content-hash-keyed `cef_host` on GCS (so consumers fetch it
+> instead of compiling, as macOS does) is scaffolded in
+> `packages/flutter_cef_windows/tool/` but not yet live — it awaits Authenticode
+> signing (see [Roadmap](#roadmap)); until then Windows builds from source.
 
 ### Bundling into a distributable app
 
@@ -452,17 +492,28 @@ Next:
   scheme handlers, a typed DevTools/CDP client (the inspector window already
   ships via `openDevTools`; this is the programmatic CDP surface), and `CefPermissionHandler`
   (WebRTC camera/mic prompts).
-- **Windows / Linux** — the package is **federated** (`flutter_cef` +
-  `flutter_cef_platform_interface` + `flutter_cef_macos`); a new platform is a
-  sibling `flutter_cef_<os>` package. The CEF logic + IPC protocol are portable;
-  each OS supplies its own host plugin + shared-texture / transport / sandbox
-  glue. See [`PORTING.md`](PORTING.md) for the full contract and seam map. A
-  Windows port (`flutter_cef_windows`) is in progress: the Dart controller /
-  widget surface is already cross-platform (the JS bridge, JS dialogs,
-  find-in-page, content zoom, and downloads all speak the same
-  method-channel/wire protocol on both OSes — see
-  `packages/flutter_cef_windows/native/cef_host/PROTOCOL.md`), with the Windows
-  host's sandbox + code-signing story still pending.
+- **Windows** (`flutter_cef_windows`) — **landed** and at feature parity for
+  browsing, pointer/keyboard/IME input, persistent + shared profiles, cookies,
+  the JS bridge, JS dialogs, find-in-page, content zoom, downloads, and
+  single-tile agent-control. The Dart controller / widget surface is shared and
+  one IPC opcode protocol drives both OSes
+  ([`PROTOCOL.md`](packages/flutter_cef_windows/native/cef_host/PROTOCOL.md)).
+  Still pending on Windows (hardening, not features):
+  - **Per-tile CDP isolation** — agent-control is enforced single-tile
+    (fail-closed: no grant on a multi-tile host); the deny-by-default per-tile
+    Target-domain filter that macOS ships (so N tiles on one profile can each be
+    agent-driven in isolation) is the next step.
+  - **Chromium sandbox** — the host currently runs `no_sandbox`; the
+    `bootstrapc.exe` + LPAC sandbox is designed (spike-proven) but not yet on.
+  - **Code-signing + prebuilt distribution** — an Authenticode-signed,
+    content-hash-keyed `cef_host` on GCS (fetched, not compiled, like macOS);
+    tooling is scaffolded in `packages/flutter_cef_windows/tool/`, awaiting a
+    signing certificate.
+  - Double-buffering the shared texture (the ~1.8% tearing measured on
+    fast-updating pages), and GPU device-lost / leak-soak hardening.
+- **Linux** — not started; the same federated seam applies (a sibling
+  `flutter_cef_linux` supplies shared-memory/DMA-buf surface + Unix-socket
+  transport). See [`PORTING.md`](PORTING.md) for the contract and seam map.
 
 ## Credits
 

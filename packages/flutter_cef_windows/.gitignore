@@ -1,3 +1,7 @@
 # Standalone cef_host build output (build_cef_host.bat's default BUILD_DIR;
 # the flutter-driven build uses the example's binary dir instead).
 native/cef_host/build/
+
+# Fetched prebuilt cef_host (tool/fetch_cef_host.ps1 downloads cef_host.exe +
+# cef_host.dll + provenance stamps here; never checked in).
+native/cef_host/prebuilt/

@@ -1,3 +1,30 @@
+## Unreleased
+
+* **Windows support** (`flutter_cef_windows`, experimental) — the port reaches
+  feature parity with macOS for browsing, pointer/keyboard/IME input, persistent
+  + shared profiles, cookies, the JS bridge (`addJavaScriptChannel` /
+  `runJavaScriptReturningResult`, per-session routed), JS dialogs, find-in-page,
+  content zoom, downloads, and single-tile agent-control (CDP over an inherited
+  pipe, token-gated loopback relay). The app-facing Dart API is unchanged and one
+  IPC opcode protocol drives both OSes. Windows specifics:
+  * **Rendering**: CEF `OnAcceleratedPaint`'s shared D3D11 texture is copied into
+    a DXGI-shared "bridge" texture that Flutter's ANGLE compositor samples (a
+    `GpuSurfaceTexture`); software `OnPaint` is the fallback.
+  * **Profiles at rest**: encrypted with **DPAPI** (OSCrypt) — always available
+    and signing-independent, so a named `profile:` persists in every build with
+    **no** macOS-style ad-hoc→ephemeral downgrade. DPAPI is same-user-readable
+    (weaker than the macOS Keychain); the profile dir also gets a current-user
+    SID DACL.
+  * **Transport/host**: one `cef_host.exe` per profile over a named pipe
+    (overlapped I/O); the CEF runtime is fetched + SHA-verified on first build
+    and `cef_host` is compiled from source (`build_cef_host.bat`, VS2022 via
+    `vswhere`).
+  * **Not yet on Windows** (hardening): per-tile CDP isolation (agent-control is
+    fail-closed single-tile), the Chromium sandbox (`no_sandbox` today), and a
+    signed prebuilt `cef_host` on GCS (tooling scaffolded, awaits an Authenticode
+    cert). Requires Windows 10+ with Developer Mode.
+  * macOS behaviour is **byte-for-byte unchanged**.
+
 ## 0.2.0
 
 * **Persistent, shared profiles**: `CefWebView(profile: 'name')` /

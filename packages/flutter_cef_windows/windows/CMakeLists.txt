@@ -114,42 +114,103 @@ if(NOT EXISTS "${FLUTTER_CEF_CEF_ROOT}/cmake")
 endif()
 message(STATUS "flutter_cef_windows: resolved CEF_ROOT = ${FLUTTER_CEF_CEF_ROOT}")
 
-# CEF is guaranteed present at this point (resolution FATALs otherwise).
-# Invoke build_cef_host.bat DIRECTLY (no explicit `cmd /c`) so paths with
-# spaces survive: Ninja already wraps the whole command line in `cmd /c "..."`,
-# so a bare `"C:\Users\a b\repo\build_cef_host.bat" "arg" "arg"` becomes the
-# safe `cmd /c ""...bat" "arg" "arg""` outer-quoted form (cmd strips only the
-# outer pair). An extra explicit `cmd /c` here would nest a second cmd whose
-# leading-quote stripping mangles a "C:\Users\a b\..." path.
-file(TO_NATIVE_PATH "${CEF_HOST_SRC_DIR}/build_cef_host.bat" _cef_host_bat)
-file(TO_NATIVE_PATH "${CEF_HOST_BUILD_DIR}" _cef_host_build_native)
-file(TO_NATIVE_PATH "${CEF_HOST_DIST_DIR}" _cef_host_dist_native)
-add_custom_command(
-  OUTPUT
-    "${CEF_HOST_DIST_DIR}/cef_host.dll"
-    "${CEF_HOST_DIST_DIR}/cef_host.exe"
-  COMMAND "${_cef_host_bat}" "${_cef_host_build_native}" "${_cef_host_dist_native}"
-  DEPENDS
-    "${CEF_HOST_SRC_DIR}/cef_host_win.cc"
-    "${CEF_HOST_SRC_DIR}/cef_host_protocol.h"
-    "${CEF_HOST_SRC_DIR}/CMakeLists.txt"
-    "${CEF_HOST_SRC_DIR}/build_cef_host.bat"
-  COMMENT "Building cef_host (CEF OSR host) via build_cef_host.bat"
-  VERBATIM
-)
-add_custom_target(flutter_cef_windows_host ALL
-  DEPENDS
-    "${CEF_HOST_DIST_DIR}/cef_host.dll"
-    "${CEF_HOST_DIST_DIR}/cef_host.exe"
-)
-add_dependencies(${PLUGIN_NAME} flutter_cef_windows_host)
+# ---- PREFER a fetched prebuilt cef_host over building from source ----
+#
+# At configure time run tool/fetch_cef_host.ps1 (the consumer half of the GCS
+# prebuilt model, mirroring macOS). It fail-OPENS (exit 0, no prebuilt placed)
+# when nothing is published for this input hash -- today's reality -- so the
+# from-source path below still runs. It fails-CLOSED (nonzero) only on a real
+# checksum / signature problem, which we propagate as a fatal error rather than
+# silently building. The CEF-RUNTIME resolution above (fetch_cef.ps1 /
+# FLUTTER_CEF_CEF_ROOT) is separate and untouched: the CEF DLLs are always
+# needed beside the app whether the host is prebuilt or from-source.
+set(CEF_HOST_PREBUILT_DIR "${CEF_HOST_SRC_DIR}/prebuilt")
+
+execute_process(
+  COMMAND powershell -NoProfile -ExecutionPolicy Bypass -File
+          "${CMAKE_CURRENT_SOURCE_DIR}/../tool/fetch_cef_host.ps1"
+  RESULT_VARIABLE _fetch_host_result)
+if(NOT _fetch_host_result EQUAL 0)
+  message(FATAL_ERROR
+    "flutter_cef_windows: fetch_cef_host.ps1 FAILED (exit ${_fetch_host_result}). "
+    "A published prebuilt cef_host failed checksum / signature verification -- "
+    "refusing to build. Set FLUTTER_CEF_FROM_SOURCE=1 to bypass the fetch, or "
+    "investigate the poisoned object / signature.")
+endif()
+
+# Trust the prebuilt only when its provenance stamp matches THIS tree's input
+# hash. Guards a stale prebuilt/ dir from an older checkout: fetch fail-opens
+# this run (nothing published for the NEW hash) but leaves the OLD binaries in
+# place -- without this check we would bundle a host built from different sources.
+set(_use_prebuilt_host OFF)
+if(EXISTS "${CEF_HOST_PREBUILT_DIR}/cef_host.dll"
+   AND EXISTS "${CEF_HOST_PREBUILT_DIR}/cef_host.exe"
+   AND EXISTS "${CEF_HOST_PREBUILT_DIR}/cef_host_input_hash.txt")
+  execute_process(
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass -File
+            "${CMAKE_CURRENT_SOURCE_DIR}/../tool/cef_host_hash.ps1"
+    OUTPUT_VARIABLE _cef_host_expected_hash
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE _cef_host_hash_result)
+  file(READ "${CEF_HOST_PREBUILT_DIR}/cef_host_input_hash.txt" _cef_host_stamp)
+  string(STRIP "${_cef_host_stamp}" _cef_host_stamp)
+  if(_cef_host_hash_result EQUAL 0 AND _cef_host_expected_hash STREQUAL _cef_host_stamp)
+    set(_use_prebuilt_host ON)
+  else()
+    message(STATUS
+      "flutter_cef_windows: prebuilt cef_host stamp mismatch "
+      "(have '${_cef_host_stamp}', want '${_cef_host_expected_hash}') -- "
+      "ignoring it; building from source.")
+  endif()
+endif()
+
+if(_use_prebuilt_host)
+  # Use the fetched, verified ship pair as-is. No build_cef_host.bat, no host
+  # target -- cef_host.exe + cef_host.dll already exist under prebuilt/.
+  set(CEF_HOST_SHIP_DIR "${CEF_HOST_PREBUILT_DIR}")
+  message(STATUS
+    "flutter_cef_windows: using PREBUILT cef_host (${_cef_host_stamp}) from "
+    "${CEF_HOST_PREBUILT_DIR}")
+else()
+  # From-source: build cef_host.dll + stage cef_host.exe via build_cef_host.bat.
+  set(CEF_HOST_SHIP_DIR "${CEF_HOST_DIST_DIR}")
+  message(STATUS "flutter_cef_windows: no matching prebuilt cef_host; building from source")
+  # Invoke build_cef_host.bat DIRECTLY (no explicit `cmd /c`) so paths with
+  # spaces survive: Ninja already wraps the whole command line in `cmd /c "..."`,
+  # so a bare `"C:\Users\a b\repo\build_cef_host.bat" "arg" "arg"` becomes the
+  # safe `cmd /c ""...bat" "arg" "arg""` outer-quoted form (cmd strips only the
+  # outer pair). An extra explicit `cmd /c` here would nest a second cmd whose
+  # leading-quote stripping mangles a "C:\Users\a b\..." path.
+  file(TO_NATIVE_PATH "${CEF_HOST_SRC_DIR}/build_cef_host.bat" _cef_host_bat)
+  file(TO_NATIVE_PATH "${CEF_HOST_BUILD_DIR}" _cef_host_build_native)
+  file(TO_NATIVE_PATH "${CEF_HOST_DIST_DIR}" _cef_host_dist_native)
+  add_custom_command(
+    OUTPUT
+      "${CEF_HOST_DIST_DIR}/cef_host.dll"
+      "${CEF_HOST_DIST_DIR}/cef_host.exe"
+    COMMAND "${_cef_host_bat}" "${_cef_host_build_native}" "${_cef_host_dist_native}"
+    DEPENDS
+      "${CEF_HOST_SRC_DIR}/cef_host_win.cc"
+      "${CEF_HOST_SRC_DIR}/cef_host_protocol.h"
+      "${CEF_HOST_SRC_DIR}/CMakeLists.txt"
+      "${CEF_HOST_SRC_DIR}/build_cef_host.bat"
+    COMMENT "Building cef_host (CEF OSR host) via build_cef_host.bat"
+    VERBATIM
+  )
+  add_custom_target(flutter_cef_windows_host ALL
+    DEPENDS
+      "${CEF_HOST_DIST_DIR}/cef_host.dll"
+      "${CEF_HOST_DIST_DIR}/cef_host.exe"
+  )
+  add_dependencies(${PLUGIN_NAME} flutter_cef_windows_host)
+endif()
 
 # Files the app needs beside its exe: the host pair + the CEF runtime.
 # (Flat CEF layout on Windows; libcef.dll etc. resolve from the exe dir.
 # Set from what cef_leg (S1) needed to run windowless+GPU.)
 set(flutter_cef_windows_bundled_libraries
-  "${CEF_HOST_DIST_DIR}/cef_host.exe"
-  "${CEF_HOST_DIST_DIR}/cef_host.dll"
+  "${CEF_HOST_SHIP_DIR}/cef_host.exe"
+  "${CEF_HOST_SHIP_DIR}/cef_host.dll"
   "${FLUTTER_CEF_CEF_ROOT}/Release/libcef.dll"
   "${FLUTTER_CEF_CEF_ROOT}/Release/chrome_elf.dll"
   "${FLUTTER_CEF_CEF_ROOT}/Release/d3dcompiler_47.dll"

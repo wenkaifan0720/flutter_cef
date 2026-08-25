@@ -18,3 +18,15 @@ publish-cef-host:
 	@test -n "$(CODESIGN_ID)" || { echo "error: no 'Developer ID Application' identity in the keychain"; exit 1; }
 	@command -v gsutil >/dev/null 2>&1 || { echo "error: gsutil not found (install the Google Cloud SDK)"; exit 1; }
 	CODESIGN_ID="$(CODESIGN_ID)" bash packages/flutter_cef_macos/tool/publish-cef-host.sh
+
+# publish-cef-host-windows: the Windows analogue (PowerShell). Builds cef_host via
+# build_cef_host.bat, (STUBBED) signs it if FLUTTER_CEF_SIGN_THUMBPRINT is set,
+# and publishes cef_host-windows-x64.zip to GCS keyed by the input hash. Guards
+# (gsutil present, signtool when signing) live inside the .ps1; run from a shell
+# where `powershell` resolves. Idempotent.
+#
+#   make publish-cef-host-windows
+#   GCS_PREFIX=campus_prebuilt_cef_host-staging make publish-cef-host-windows   # dry-run to staging
+.PHONY: publish-cef-host-windows
+publish-cef-host-windows:
+	powershell -NoProfile -ExecutionPolicy Bypass -File packages/flutter_cef_windows/tool/publish-cef-host.ps1
