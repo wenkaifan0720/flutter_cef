@@ -1476,6 +1476,7 @@ std::string JsonEscape(const std::string& s) {
   return out;
 }
 
+const char* SameSiteToString(cef_cookie_same_site_t v);
 std::string CookieToJson(const CefCookie& c) {
   std::string out = "{";
   out += "\"name\":\"" + JsonEscape(CefString(&c.name).ToString()) + "\",";
@@ -1483,7 +1484,8 @@ std::string CookieToJson(const CefCookie& c) {
   out += "\"domain\":\"" + JsonEscape(CefString(&c.domain).ToString()) + "\",";
   out += "\"path\":\"" + JsonEscape(CefString(&c.path).ToString()) + "\",";
   out += "\"secure\":" + std::string(c.secure ? "true" : "false") + ",";
-  out += "\"httpOnly\":" + std::string(c.httponly ? "true" : "false");
+  out += "\"httpOnly\":" + std::string(c.httponly ? "true" : "false") + ",";
+  out += "\"sameSite\":\"" + std::string(SameSiteToString(c.same_site)) + "\"";
   return out + "}";
 }
 
@@ -1508,9 +1510,26 @@ class HostCookieVisitor : public CefCookieVisitor {
   IMPLEMENT_REFCOUNTING(HostCookieVisitor);
 };
 
+// Map the wire sameSite token to Chromium's enum (and back for getCookies).
+cef_cookie_same_site_t ParseSameSite(const std::string& s) {
+  if (s == "none") return CEF_COOKIE_SAME_SITE_NO_RESTRICTION;
+  if (s == "lax") return CEF_COOKIE_SAME_SITE_LAX_MODE;
+  if (s == "strict") return CEF_COOKIE_SAME_SITE_STRICT_MODE;
+  return CEF_COOKIE_SAME_SITE_UNSPECIFIED;
+}
+const char* SameSiteToString(cef_cookie_same_site_t v) {
+  switch (v) {
+    case CEF_COOKIE_SAME_SITE_NO_RESTRICTION: return "none";
+    case CEF_COOKIE_SAME_SITE_LAX_MODE: return "lax";
+    case CEF_COOKIE_SAME_SITE_STRICT_MODE: return "strict";
+    default: return "unspecified";
+  }
+}
+
 void DoSetCookie(const std::shared_ptr<Slot>& slot, const std::string& url,
                  const std::string& name, const std::string& value,
-                 const std::string& domain, const std::string& path) {
+                 const std::string& domain, const std::string& path,
+                 bool secure, bool http_only, const std::string& same_site) {
   CefRefPtr<CefCookieManager> mgr = CefCookieManager::GetGlobalManager(nullptr);
   if (!mgr) return;
   CefCookie cookie;
@@ -1519,6 +1538,11 @@ void DoSetCookie(const std::shared_ptr<Slot>& slot, const std::string& url,
   if (!domain.empty()) CefString(&cookie.domain).FromString(domain);
   CefString(&cookie.path).FromString(path.empty() ? "/" : path);
   cookie.has_expires = false;
+  // SameSite=None without Secure is rejected by Chromium (the cookie is
+  // dropped at SetCookie time), so force Secure on for that combination.
+  cookie.secure = (secure || same_site == "none") ? 1 : 0;
+  cookie.httponly = http_only ? 1 : 0;
+  cookie.same_site = ParseSameSite(same_site);
   if (!mgr->SetCookie(url, cookie, nullptr)) {
     SendLog(slot->browser_id,
             "setCookie rejected for " + url + " (name '" + name + "')");
@@ -1852,9 +1876,10 @@ void IpcReadLoop() {
             start = i + 1;
           }
         }
-        while (f.size() < 5) f.push_back("");
-        CefPostTask(TID_UI, base::BindOnce(&DoSetCookie, slot, f[0], f[1],
-                                           f[2], f[3], f[4]));
+        while (f.size() < 8) f.push_back("");
+        CefPostTask(TID_UI,
+                    base::BindOnce(&DoSetCookie, slot, f[0], f[1], f[2], f[3],
+                                   f[4], f[5] == "1", f[6] == "1", f[7]));
         break;
       }
       case kOpClearCookies:

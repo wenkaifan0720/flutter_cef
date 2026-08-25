@@ -124,7 +124,7 @@ Payload minimums are enforced host-side exactly as the macOS read loop does
 | 0x29 | kOpJsDialogResp | `{u32 id}{u8 ok}{utf8 text}` (plen>=5) | main.mm:149, 2466-2474 |
 | 0x2a | kOpEvalReturning | `{u32 id}{utf8 code}` (plen>=4) | main.mm:150, 2475-2482 |
 | 0x2b | kOpAddChannel | `{utf8 name}` — do NOT require a bound slot (registers process-global; injected on load). | main.mm:151, 2483-2494 |
-| 0x2c | kOpSetCookie | `{utf8 url\0name\0value\0domain\0path}` (NUL-separated, pad missing fields to 5) | main.mm:152, 2495-2510 |
+| 0x2c | kOpSetCookie | `{utf8 url\0name\0value\0domain\0path[\0secure(0|1)\0httpOnly(0|1)\0sameSite(unspecified|none|lax|strict)]}` (NUL-separated, pad missing fields to 8; hosts older than the attribute fields read only the first five) | main.mm:152, 2495-2510 |
 | 0x2d | kOpClearCookies | `{}` delete all cookies | main.mm:153 |
 | 0x2e | kOpVisitCookies | `{u32 id}{utf8 url}` enumerate (url empty = all) | main.mm:154, 2515-2522 |
 | 0x2f | kOpDeleteCookie | `{utf8 url\0name}` delete one | main.mm:155, 2523-2531 |
@@ -175,7 +175,7 @@ reply success/null + `OutputDebugString` warning, never an error.
 | respondJsDialog | id:int, ok:bool, text:String | null | 0x29 | P7 | Swift:152-158 |
 | evalReturning | id:int, code:String | null | 0x2a | P7 | Swift:159-165 |
 | addJavaScriptChannel | name:String | null | 0x2b | P7 | Swift:166-170 |
-| setCookie | url, name, value, domain, path : String | null | 0x2c | P6 | Swift:171-179 |
+| setCookie | url, name, value, domain, path, sameSite : String; secure, httpOnly : bool | null | 0x2c | P6 | Swift:171-179 |
 | clearCookies | — | null | 0x2d | P6 | Swift:180-182 |
 | visitCookies | id:int, url:String | null | 0x2e | P6 | Swift:183-188 |
 | deleteCookie | url:String, name:String | null | 0x2f | P6 | Swift:189-194 |
@@ -327,7 +327,7 @@ with main.mm cites) and reached from Dart via the verbs in §3/§4 — summarize
 
 | Dart (controller) | Verb (§3) | Opcode (§2) | main.mm |
 |---|---|---|---|
-| `setCookie(url,name,value,domain,path)` | `setCookie` | 0x2c `{utf8 url\0name\0value\0domain\0path}` (pad to 5) | 2495-2510 |
+| `setCookie(url,name,value,domain,path,secure,httpOnly,sameSite)` | `setCookie` | 0x2c `{utf8 url\0name\0value\0domain\0path\0secure\0httpOnly\0sameSite}` (pad to 8) | 2495-2510 |
 | `clearCookies()` | `clearCookies` | 0x2d `{}` | 2511-2514 |
 | `getCookies({url})` → `List<CefCookie>` | `visitCookies` | 0x2e `{u32 id}{utf8 url}` (empty = all) → **0x1a** `{u32 id}{utf8 json-array}` event | 2515-2522 |
 | `deleteCookie(url,name)` | `deleteCookie` | 0x2f `{utf8 url\0name}` | 2523-2531 |

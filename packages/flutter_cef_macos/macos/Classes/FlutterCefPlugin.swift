@@ -221,7 +221,10 @@ public class FlutterCefPlugin: NSObject, FlutterPlugin {
                      name: args["name"] as? String ?? "",
                      value: args["value"] as? String ?? "",
                      domain: args["domain"] as? String ?? "",
-                     path: args["path"] as? String ?? "/")
+                     path: args["path"] as? String ?? "/",
+                     secure: args["secure"] as? Bool ?? false,
+                     httpOnly: args["httpOnly"] as? Bool ?? false,
+                     sameSite: args["sameSite"] as? String ?? "unspecified")
       }
       result(nil)
     case "clearCookies":

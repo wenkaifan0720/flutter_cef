@@ -220,6 +220,12 @@ class CefSurfaceInfo {
   String toString() => 'CefSurfaceInfo($surfaceId, ${width}x$height)';
 }
 
+/// A cookie's `SameSite` attribute, mirroring Chromium's
+/// `cef_cookie_same_site_t`. [none] is what lets a cookie ride cross-site
+/// subresource requests (fetches, websocket handshakes) — Chromium requires
+/// `Secure` alongside it and drops the cookie otherwise.
+enum CefCookieSameSite { unspecified, none, lax, strict }
+
 /// A cookie returned by [CefWebController.getCookies].
 class CefCookie {
   const CefCookie({
@@ -229,9 +235,11 @@ class CefCookie {
     required this.path,
     required this.secure,
     required this.httpOnly,
+    this.sameSite = CefCookieSameSite.unspecified,
   });
 
-  /// Parse one cookie from the host's JSON.
+  /// Parse one cookie from the host's JSON. `sameSite` is absent in the JSON
+  /// of hosts that predate it — parsed as [CefCookieSameSite.unspecified].
   factory CefCookie.fromJson(Map<String, dynamic> j) => CefCookie(
         name: j['name'] as String? ?? '',
         value: j['value'] as String? ?? '',
@@ -239,6 +247,9 @@ class CefCookie {
         path: j['path'] as String? ?? '',
         secure: j['secure'] as bool? ?? false,
         httpOnly: j['httpOnly'] as bool? ?? false,
+        sameSite: CefCookieSameSite.values
+                .asNameMap()[j['sameSite'] as String? ?? ''] ??
+            CefCookieSameSite.unspecified,
       );
 
   final String name;
@@ -247,10 +258,12 @@ class CefCookie {
   final String path;
   final bool secure;
   final bool httpOnly;
+  final CefCookieSameSite sameSite;
 
   @override
   String toString() => 'CefCookie($name=$value; domain=$domain path=$path'
-      '${secure ? ' secure' : ''}${httpOnly ? ' httpOnly' : ''})';
+      '${secure ? ' secure' : ''}${httpOnly ? ' httpOnly' : ''}'
+      '${sameSite == CefCookieSameSite.unspecified ? '' : ' ${sameSite.name}'})';
 }
 
 /// One row in a page context menu, as Chromium built it.

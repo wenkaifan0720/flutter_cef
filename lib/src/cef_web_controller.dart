@@ -863,12 +863,22 @@ class CefWebController {
 
   /// Set a cookie in the global (process-wide) cookie store. [url] scopes the
   /// cookie; [domain] defaults to the url's host.
+  ///
+  /// [secure], [httpOnly], and [sameSite] mirror the cookie attributes of the
+  /// same names. [CefCookieSameSite.none] requires [secure] — Chromium rejects
+  /// `SameSite=None` without `Secure` — and is what lets the cookie ride
+  /// cross-site subresource requests (fetches, websocket handshakes). Hosts
+  /// older than these fields ignore them and store the cookie `SameSite`
+  /// unspecified (treated as Lax).
   Future<void> setCookie({
     required String url,
     required String name,
     required String value,
     String domain = '',
     String path = '/',
+    bool secure = false,
+    bool httpOnly = false,
+    CefCookieSameSite sameSite = CefCookieSameSite.unspecified,
   }) =>
       _channel.invokeMethod('setCookie', {
         'sessionId': sessionId,
@@ -877,6 +887,9 @@ class CefWebController {
         'value': value,
         'domain': domain,
         'path': path,
+        'secure': secure,
+        'httpOnly': httpOnly,
+        'sameSite': sameSite.name,
       });
 
   /// Delete all cookies from the global cookie store.

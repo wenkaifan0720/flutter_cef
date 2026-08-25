@@ -902,12 +902,20 @@ void main() {
   test('cookie verbs forward to native', () async {
     final c = CefWebController(sessionId: 'ck');
     await c.setCookie(
-        url: 'https://x.test/', name: 'sid', value: 'abc', domain: 'x.test');
+        url: 'https://x.test/',
+        name: 'sid',
+        value: 'abc',
+        domain: 'x.test',
+        secure: true,
+        sameSite: CefCookieSameSite.none);
     await c.clearCookies();
     final set = log.firstWhere((m) => m.method == 'setCookie').arguments as Map;
     expect(set['name'], 'sid');
     expect(set['value'], 'abc');
     expect(set['domain'], 'x.test');
+    expect(set['secure'], true);
+    expect(set['httpOnly'], false);
+    expect(set['sameSite'], 'none');
     expect(log.any((m) => m.method == 'clearCookies'), true);
   });
 
@@ -924,7 +932,7 @@ void main() {
         'sessionId': 'ckr',
         'id': visit['id'],
         'json': '[{"name":"sid","value":"abc","domain":"x.test","path":"/",'
-            '"secure":true,"httpOnly":false}]',
+            '"secure":true,"httpOnly":false,"sameSite":"none"}]',
       })),
       (_) {},
     );
@@ -933,6 +941,7 @@ void main() {
     expect(cookies.single.name, 'sid');
     expect(cookies.single.value, 'abc');
     expect(cookies.single.secure, isTrue);
+    expect(cookies.single.sameSite, CefCookieSameSite.none);
     await c.dispose();
   });
 

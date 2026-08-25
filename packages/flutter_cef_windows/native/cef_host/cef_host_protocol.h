@@ -81,7 +81,7 @@ constexpr uint8_t kOpStopFind = 0x28;   // {u8 clearSelection}
 constexpr uint8_t kOpJsDialogResp = 0x29;   // {u32 id}{u8 ok}{utf8 text}
 constexpr uint8_t kOpEvalReturning = 0x2a;  // {u32 id}{utf8 code}
 constexpr uint8_t kOpAddChannel = 0x2b;     // {utf8 name} register a JS channel
-constexpr uint8_t kOpSetCookie = 0x2c;      // {utf8 url\0name\0value\0domain\0path}
+constexpr uint8_t kOpSetCookie = 0x2c;      // {utf8 url\0name\0value\0domain\0path[\0secure(0|1)\0httpOnly(0|1)\0sameSite(unspecified|none|lax|strict)]}
 constexpr uint8_t kOpClearCookies = 0x2d;   // {} delete all cookies
 constexpr uint8_t kOpVisitCookies = 0x2e;   // {u32 id}{utf8 url} enumerate (url empty = all)
 constexpr uint8_t kOpDeleteCookie = 0x2f;   // {utf8 url\0name} delete one

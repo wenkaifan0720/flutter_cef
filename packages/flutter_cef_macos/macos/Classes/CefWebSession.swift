@@ -552,8 +552,13 @@ final class CefWebSession: NSObject, FlutterTexture {
   }
 
   func setCookie(url: String, name: String, value: String, domain: String,
-                 path: String) {
-    let payload = [url, name, value, domain, path].joined(separator: "\u{0}")
+                 path: String, secure: Bool = false, httpOnly: Bool = false,
+                 sameSite: String = "unspecified") {
+    // Eight NUL-separated fields. Hosts older than the attribute fields read
+    // only the first five and ignore the rest; newer hosts pad missing ones.
+    let payload = [url, name, value, domain, path,
+                   secure ? "1" : "0", httpOnly ? "1" : "0", sameSite]
+      .joined(separator: "\u{0}")
     sendFrame(Self.opSetCookie, Array(payload.utf8))
   }
 

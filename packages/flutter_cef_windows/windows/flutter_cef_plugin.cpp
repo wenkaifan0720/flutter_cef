@@ -540,12 +540,20 @@ void FlutterCefPlugin::HandleMethodCall(
   // request id via the 'cookies' event (kOpCookies).
   if (method == "setCookie") {
     if (s) {
-      // {utf8 url\0name\0value\0domain\0path} (main.mm kOpSetCookie:152).
+      // {utf8 url\0name\0value\0domain\0path\0secure\0httpOnly\0sameSite}
+      // (main.mm kOpSetCookie). Hosts older than the attribute fields read
+      // only the first five.
       const std::string payload = GetString(args, "url") + '\0' +
                                   GetString(args, "name") + '\0' +
                                   GetString(args, "value") + '\0' +
                                   GetString(args, "domain") + '\0' +
-                                  GetString(args, "path", "/");
+                                  GetString(args, "path", "/") + '\0' +
+                                  (GetBool(args, "secure", false) ? "1" : "0") +
+                                  '\0' +
+                                  (GetBool(args, "httpOnly", false) ? "1"
+                                                                    : "0") +
+                                  '\0' +
+                                  GetString(args, "sameSite", "unspecified");
       std::vector<uint8_t> p(payload.begin(), payload.end());
       SendOrQueue(s, kOpSetCookie, std::move(p));
     }

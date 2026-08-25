@@ -11,6 +11,7 @@ library;
 export 'package:flutter_cef_platform_interface/flutter_cef_platform_interface.dart'
     show
         CefCookie,
+        CefCookieSameSite,
         CefConsoleMessage,
         CefContextMenuItem,
         CefContextMenuItemType,
